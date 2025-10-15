@@ -24,3 +24,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Inputs đẹp hơn, đồng bộ giữa các loại */
+.tn-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #e5e7eb; /* gray-200 */
+  border-radius: 6px;
+  outline: none;
+  transition: box-shadow .15s ease, border-color .15s ease;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+  background: #fff;
+}
+.tn-input:focus {
+  border-color: #3b82f6; /* blue-500 */
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+}
+.tn-input--num {
+  /* giữ variant borderless của AntD nhưng vẫn có padding */
+  padding: 6px 10px !important;
+}
+.tn-input--money {
+  font-variant-numeric: tabular-nums;
+}

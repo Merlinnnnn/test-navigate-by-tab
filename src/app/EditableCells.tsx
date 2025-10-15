@@ -89,12 +89,24 @@ export const EditableCell: React.FC<EditableCellProps> = ({
       e.preventDefault();
       commit();
       const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-      requestAnimationFrame(() => focusCell(next));
+      requestAnimationFrame(() => {
+        focusCell(next);
+        if (next) {
+          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+          if (first) first.focus();
+        }
+      });
     } else if (e.key === "Tab") {
       e.preventDefault();
       revert();
       const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-      requestAnimationFrame(() => focusCell(next));
+      requestAnimationFrame(() => {
+        focusCell(next);
+        if (next) {
+          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+          if (first) first.focus();
+        }
+      });
     }
   };
 
@@ -105,15 +117,8 @@ export const EditableCell: React.FC<EditableCellProps> = ({
       onChange={(e) => setLocal(e.target.value)}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      className={className ?? "inputNumber"}
-      style={
-        style ?? {
-          width: "100%",
-          padding: "4px 11px",
-          border: "1px solid #d9d9d9",
-          borderRadius: 4,
-        }
-      }
+      className={className ?? "tn-input"}
+      style={style}
       placeholder={placeholder}
     />
   );
@@ -180,12 +185,24 @@ export const NumericEditable: React.FC<NumericEditableProps> = ({
       e.preventDefault();
       commit();
       const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-      requestAnimationFrame(() => focusCell(next));
+      requestAnimationFrame(() => {
+        focusCell(next);
+        if (next) {
+          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+          if (first) first.focus();
+        }
+      });
     } else if (e.key === "Tab") {
       e.preventDefault();
       revert();
       const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-      requestAnimationFrame(() => focusCell(next));
+      requestAnimationFrame(() => {
+        focusCell(next);
+        if (next) {
+          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+          if (first) first.focus();
+        }
+      });
     }
   };
 
@@ -200,8 +217,8 @@ export const NumericEditable: React.FC<NumericEditableProps> = ({
       inputMode="numeric"
       pattern="\d*"
       variant="borderless"
-      className={className ?? "inputNumber"}
-      style={style ?? { width: "100%", padding: "4px 11px" }}
+      className={className ?? "tn-input tn-input--num"}
+      style={style}
     />
   );
 };
@@ -292,12 +309,24 @@ export const MoneyEditable: React.FC<MoneyEditableProps> = ({
       e.preventDefault();
       commit();
       const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-      requestAnimationFrame(() => focusCell(next));
+      requestAnimationFrame(() => {
+        focusCell(next);
+        if (next) {
+          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+          if (first) first.focus();
+        }
+      });
     } else if (e.key === "Tab") {
       e.preventDefault();
       revert();
       const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-      requestAnimationFrame(() => focusCell(next));
+      requestAnimationFrame(() => {
+        focusCell(next);
+        if (next) {
+          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+          if (first) first.focus();
+        }
+      });
     }
   };
 
@@ -309,10 +338,8 @@ export const MoneyEditable: React.FC<MoneyEditableProps> = ({
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
       inputMode="decimal"
-      className={className ?? "inputNumber"}
-      style={
-        style ?? { width: "100%", padding: "4px 11px", border: "1px solid #d9d9d9", borderRadius: 4 }
-      }
+      className={className ?? "tn-input tn-input--money"}
+      style={style}
     />
   );
 };

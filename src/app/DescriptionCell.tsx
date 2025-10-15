@@ -61,7 +61,7 @@ const DescriptionCell: React.FC<Props> = ({ rowKey, rowIndex, colKey, items, onC
       }
       return;
     }
-    if (e.key === "Tab" && e.shiftKey) {
+    if ((e.key === "Tab" && e.ctrlKey) || (e.key === "ArrowLeft" && e.ctrlKey)) {
       console.log("Ctrl+Tab");
       e.preventDefault();
       // Ctrl+Tab: hoàn tác item hiện tại rồi lùi về cột trước
@@ -70,9 +70,14 @@ const DescriptionCell: React.FC<Props> = ({ rowKey, rowIndex, colKey, items, onC
       if (prev) {
         requestAnimationFrame(() => {
           focusCell(prev);
-          // nếu cột trước là mô tả, cũng ưu tiên focus item đầu tiên
-          const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(prev.rowKey, `${prev.colKey}-0`)}"]`);
-          if (first) first.focus();
+          // nếu cột trước là mô tả, ưu tiên focus item đầu tiên; nếu là image, ưu tiên search (index 0)
+          const firstDesc = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(prev.rowKey, `${prev.colKey}-0`)}"]`);
+          if (firstDesc) {
+            firstDesc.focus();
+          } else {
+            const imageSearch = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(prev.rowKey, `${prev.colKey}-0`)}"]`);
+            if (imageSearch) imageSearch.focus();
+          }
         });
       }
       return;
@@ -84,7 +89,13 @@ const DescriptionCell: React.FC<Props> = ({ rowKey, rowIndex, colKey, items, onC
         requestAnimationFrame(() => focusInner(idx + 1));
       } else {
         const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-        requestAnimationFrame(() => focusCell(next));
+        requestAnimationFrame(() => {
+          focusCell(next);
+          if (next) {
+            const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+            if (first) first.focus();
+          }
+        });
       }
     } else if (e.key === "Tab") {
       console.log("Tab");
@@ -94,7 +105,13 @@ const DescriptionCell: React.FC<Props> = ({ rowKey, rowIndex, colKey, items, onC
         requestAnimationFrame(() => focusInner(idx + 1));
       } else {
         const next = computeNextCell(nav.orderedRowKeys, nav.editableColKeysInOrder, rowKey, colKey);
-        requestAnimationFrame(() => focusCell(next));
+        requestAnimationFrame(() => {
+          focusCell(next);
+          if (next) {
+            const first = document.querySelector<HTMLInputElement>(`[data-cell-id="${CELL_ID(next.rowKey, `${next.colKey}-0`)}"]`);
+            if (first) first.focus();
+          }
+        });
       }
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -109,10 +126,10 @@ const DescriptionCell: React.FC<Props> = ({ rowKey, rowIndex, colKey, items, onC
 
   // UI: Giao diện name : input(value) xếp theo cột
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {items.map((it, idx) => (
-        <div key={idx} style={{ display: "grid", gridTemplateColumns: "120px 1fr", alignItems: "center", gap: 8 }}>
-          <div style={{ color: "#555" }}>{it.name}</div>
+        <div key={idx} style={{ display: "grid", gridTemplateColumns: "120px 1fr", alignItems: "center", gap: 12 }}>
+          <div style={{ color: "#6b7280", fontSize: 12 }}>{it.name}</div>
           <input
             data-cell-id={inputIdFor(rowKey, colKey, idx)}
             value={locals[idx] ?? ""}
@@ -124,9 +141,12 @@ const DescriptionCell: React.FC<Props> = ({ rowKey, rowIndex, colKey, items, onC
             onBlur={handleBlur(idx)}
             style={{
               width: "100%",
-              padding: "4px 8px",
-              border: "1px solid #d9d9d9",
-              borderRadius: 4,
+              padding: "6px 10px",
+              border: "1px solid #e5e7eb",
+              borderRadius: 6,
+              outline: "none",
+              transition: "box-shadow .15s ease, border-color .15s ease",
+              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.04)",
             }}
           />
         </div>

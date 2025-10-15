@@ -7,9 +7,13 @@ import type { ColumnsType } from "antd/es/table";
 import { EditableCell, MoneyEditable, NumericEditable, NavigationContext } from "./EditableCells";
 // UI INPUT (stacked): Ô mô tả quản lý nhiều cặp name:value
 import DescriptionCell, { DescriptionItem } from "./DescriptionCell";
+import ImageCell from "./ImageCell";
 
 type Row = {
   key: string | number;
+  imageSearch?: string;
+  imageUrl?: string;
+  imageId?: string;
   unit?: string;
   quantity?: number;
   chanel?: number;
@@ -22,6 +26,9 @@ type Row = {
 
 const initialRows: Row[] = Array.from({ length: 5 }).map((_, i) => ({
   key: i + 1,
+  imageSearch: "",
+  imageUrl: "",
+  imageId: "",
   unit: "pcs",
   quantity: 1,
   chanel: 0,
@@ -42,6 +49,10 @@ export default function Home() {
 
   const setQuantity = (rowIndex: number, val: number) =>
     setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, quantity: val } : r)));
+  const setImageSearch = (rowIndex: number, val: string) =>
+    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, imageSearch: val } : r)));
+  const setImageId = (rowIndex: number, val: string) =>
+    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, imageId: val } : r)));
   const setChanel = (rowIndex: number, val: number) =>
     setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, chanel: val } : r)));
   const setUnitPrice = (rowIndex: number, val: number) =>
@@ -66,6 +77,7 @@ export default function Home() {
 
   // Chỉ liệt kê cột editable; cột chỉ có text không đưa vào để focus bỏ qua.
   const editableColKeysInOrder = [
+    "image",
     "itemDescription",
     "unit",
     "quantity",
@@ -79,6 +91,22 @@ export default function Home() {
   // UI: Định nghĩa cột. Cột editable render input tùy chỉnh, cột text là hiển thị tĩnh.
   const columns: ColumnsType<Row> = [
     { title: "Index", dataIndex: "key", width: 70, render: (_: any, __: Row, rowIndex) => rowIndex + 1 },
+    {
+      title: "Image",
+      dataIndex: "image",
+      width: 240,
+      render: (_: any, record: Row, rowIndex: number) => (
+        <ImageCell
+          rowKey={record.key}
+          colKey="image"
+          search={record.imageSearch ?? ""}
+          imageUrl={record.imageUrl}
+          imageId={record.imageId}
+          onCommitSearch={(v) => setImageSearch(rowIndex, v)}
+          onCommitId={(v) => setImageId(rowIndex, v)}
+        />
+      ),
+    },
     {
       title: "Item description",
       dataIndex: "itemDescriptions",
