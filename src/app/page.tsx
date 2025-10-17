@@ -1,250 +1,138 @@
 "use client";
-// TRANG: Bảng demo có điều hướng bằng bàn phím & cơ chế dual-state
 import React from "react";
-import { Table, Switch } from "antd";
-import type { ColumnsType } from "antd/es/table";
-// UI INPUTS: Các ô editable với Enter=ghi, Tab=hoàn tác, Blur=ghi
-import { EditableCell, MoneyEditable, NumericEditable, NavigationContext } from "./EditableCells";
-// UI INPUT (stacked): Ô mô tả quản lý nhiều cặp name:value
-import DescriptionCell, { DescriptionItem } from "./DescriptionCell";
-import ImageCell from "./ImageCell";
+import { Button, Drawer, Input, Upload, Space, Avatar, List, Typography, Image, Tag } from "antd";
+import { SendOutlined, MessageOutlined, PaperClipOutlined, UserOutlined, CloseOutlined } from "@ant-design/icons";
 
-type Row = {
-  key: string | number;
-  imageSearch?: string;
-  imageUrl?: string;
-  imageId?: string;
-  unit?: string;
-  quantity?: number;
-  chanel?: number;
-  unitPrice?: number;
-  tax?: number;
-  waranty?: string;
-  deliveryTime?: string;
-  itemDescriptions?: DescriptionItem[];
+type Message = {
+  id: string;
+  author: "me" | "bot";
+  content: string;
+  time: string;
+  attachments?: Array<{ name: string; type: string; url?: string }>;
 };
 
-const initialRows: Row[] = Array.from({ length: 5 }).map((_, i) => ({
-  key: i + 1,
-  imageSearch: "",
-  imageUrl: "",
-  imageId: "",
-  unit: "pcs",
-  quantity: 1,
-  chanel: 0,
-  unitPrice: 100,
-  tax: 10,
-  waranty: "12m",
-  deliveryTime: "7",
-  itemDescriptions: [
-    { name: "Power", value: "100W" },
-    { name: "CRI", value: "90" },
-    { name: "CCT", value: "4000K" },
-  ],
-}));
-
 export default function Home() {
-  const [rows, setRows] = React.useState<Row[]>(initialRows);
-  const [isVn, setIsVn] = React.useState<boolean>(true);
+  const [open, setOpen] = React.useState(false);
+  const [messages, setMessages] = React.useState<Message[]>([{
+    id: "m1",
+    author: "bot",
+    content: "Xin chào! Hãy nhập tin nhắn hoặc gửi file để bắt đầu.",
+    time: new Date().toLocaleTimeString(),
+  }]);
+  const [input, setInput] = React.useState("");
+  const [attachments, setAttachments] = React.useState<Array<{ file: File; previewUrl?: string }>>([]);
 
-  const setQuantity = (rowIndex: number, val: number) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, quantity: val } : r)));
-  const setImageSearch = (rowIndex: number, val: string) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, imageSearch: val } : r)));
-  const setImageId = (rowIndex: number, val: string) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, imageId: val } : r)));
-  const setChanel = (rowIndex: number, val: number) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, chanel: val } : r)));
-  const setUnitPrice = (rowIndex: number, val: number) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, unitPrice: val } : r)));
-  const setTax = (rowIndex: number, val: number) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, tax: val } : r)));
-  const setUnit = (rowIndex: number, val: string) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, unit: val } : r)));
-  const setWaranty = (rowIndex: number, val: string) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, waranty: val } : r)));
-  const setDeliveryTime = (rowIndex: number, val: string) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? { ...r, deliveryTime: val } : r)));
-  const setDescriptionItem = (rowIndex: number, itemIndex: number, val: string) =>
-    setRows(prev => prev.map((r, i) => (i === rowIndex ? {
-      ...r,
-      itemDescriptions: (r.itemDescriptions ?? []).map((it, j) => j === itemIndex ? { ...it, value: val } : it)
-    } : r)));
+  const sendText = () => {
+    const trimmed = input.trim();
+    if (!trimmed && attachments.length === 0) return;
 
-  // DỮ LIỆU ĐIỀU HƯỚNG: thứ tự hàng và danh sách cột editable
-  const dataSource = rows;
-  const orderedRowKeys = dataSource.map(r => r.key);
+    const atts = attachments.map(a => ({ name: a.file.name, type: a.file.type, url: a.previewUrl }));
+    setMessages(prev => ([...prev, { id: String(Date.now()), author: "me", content: trimmed, attachments: atts, time: new Date().toLocaleTimeString() }]));
+    setInput("");
+    setAttachments([]);
+  };
 
-  // Chỉ liệt kê cột editable; cột chỉ có text không đưa vào để focus bỏ qua.
-  const editableColKeysInOrder = [
-    "image",
-    "itemDescription",
-    "unit",
-    "quantity",
-    "chanel",
-    "unitPrice",
-    "tax",
-    "waranty",
-    "deliveryTime",
-  ];
+  const onPickFile = async (file: File) => {
+    const isImage = file.type.startsWith("image/");
+    const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
+    setAttachments(prev => [...prev, { file, previewUrl }]);
+    return false; // prevent auto upload
+  };
 
-  // UI: Định nghĩa cột. Cột editable render input tùy chỉnh, cột text là hiển thị tĩnh.
-  const columns: ColumnsType<Row> = [
-    { title: "Index", dataIndex: "key", width: 70, render: (_: any, __: Row, rowIndex) => rowIndex + 1 },
-    {
-      title: "Image",
-      dataIndex: "image",
-      width: 240,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <ImageCell
-          rowKey={record.key}
-          colKey="image"
-          search={record.imageSearch ?? ""}
-          imageUrl={record.imageUrl}
-          imageId={record.imageId}
-          onCommitSearch={(v) => setImageSearch(rowIndex, v)}
-          onCommitId={(v) => setImageId(rowIndex, v)}
-        />
-      ),
-    },
-    {
-      title: "Item description",
-      dataIndex: "itemDescriptions",
-      width: 320,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <DescriptionCell
-          rowKey={record.key}
-          rowIndex={rowIndex}
-          colKey="itemDescription"
-          items={record.itemDescriptions ?? []}
-          onCommitItem={(itemIdx, v) => setDescriptionItem(rowIndex, itemIdx, v)}
-        />
-      ),
-    },
-    {
-      title: "Unit",
-      dataIndex: "unit",
-      width: 100,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <EditableCell
-          value={record.unit ?? ""}
-          rowKey={record.key}
-          colKey="unit"
-          onCommit={(val) => setUnit(rowIndex, val)}
-        />
-      ),
-    },
-    {
-      title: "Quantity",
-      dataIndex: "quantity",
-      width: 120,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <NumericEditable
-          value={record.quantity ?? 0}
-          rowKey={record.key}
-          colKey="quantity"
-          onCommit={(val) => setQuantity(rowIndex, val)}
-        />
-      ),
-    },
-    {
-      title: "Chanels",
-      dataIndex: "chanel",
-      width: 120,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <NumericEditable
-          value={record.chanel ?? 0}
-          rowKey={record.key}
-          colKey="chanel"
-          onCommit={(val) => setChanel(rowIndex, val)}
-        />
-      ),
-    },
-    // mock dynamic text-only columns generated by generateDynamicColumns
-    {
-      title: "Color",
-      dataIndex: "color",
-      width: 120,
-      render: () => <span>Warm White</span>,
-    },
-    {
-      title: "Dimension",
-      dataIndex: "dimension",
-      width: 160,
-      render: () => <span>1000 x 200 x 50</span>,
-    },
-    {
-      title: `Unit price (${isVn ? 'VND' : 'USD'})`,
-      dataIndex: "unitPrice",
-      width: 160,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <MoneyEditable
-          value={record.unitPrice ?? 0}
-          isVN={isVn}
-          rowKey={record.key}
-          colKey="unitPrice"
-          onCommit={(val) => setUnitPrice(rowIndex, val)}
-        />
-      ),
-    },
-    {
-      title: "VAT Rate (%)",
-      dataIndex: "tax",
-      width: 140,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <NumericEditable
-          value={record.tax ?? 0}
-          rowKey={record.key}
-          colKey="tax"
-          onCommit={(val) => setTax(rowIndex, val)}
-        />
-      ),
-    },
-    {
-      title: "Waranty",
-      dataIndex: "waranty",
-      width: 140,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <EditableCell
-          value={record.waranty ?? ""}
-          rowKey={record.key}
-          colKey="waranty"
-          onCommit={(val) => setWaranty(rowIndex, val)}
-        />
-      ),
-    },
-    {
-      title: "Delivery time",
-      dataIndex: "deliveryTime",
-      width: 160,
-      render: (_: any, record: Row, rowIndex: number) => (
-        <EditableCell
-          value={record.deliveryTime ?? ""}
-          rowKey={record.key}
-          colKey="deliveryTime"
-          onCommit={(val) => setDeliveryTime(rowIndex, val)}
-        />
-      ),
-    },
-  ];
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 12 }}>
-        <span style={{ marginRight: 8 }}>Currency:</span>
-        <Switch
-          checkedChildren="VND"
-          unCheckedChildren="USD"
-          checked={isVn}
-          onChange={setIsVn}
-        />
-      </div>
-      <NavigationContext.Provider value={{ orderedRowKeys, editableColKeysInOrder }}>
-        <Table columns={columns} dataSource={dataSource} rowKey="key" pagination={false} bordered />
-      </NavigationContext.Provider>
-      <div style={{ marginTop: 12, color: "#666" }}>
-        Enter = Commit + Move next | Tab = Revert + Move next | Blur = Commit
-      </div>
+    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <Button type="primary" size="large" icon={<MessageOutlined />} onClick={() => setOpen(true)}>
+        Mở chat
+      </Button>
+
+      <Drawer
+        title={<Space><Avatar icon={<UserOutlined />} /> <span>Chat demo</span></Space>}
+        placement="right"
+        width={420}
+        open={open}
+        onClose={() => setOpen(false)}
+        styles={{ body: { display: "flex", flexDirection: "column", padding: 0 } }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ padding: 16, flex: 1, overflow: "auto", background: "#fafafa" }}>
+            <List
+              dataSource={messages}
+              renderItem={(m) => (
+                <List.Item style={{ border: "none", padding: "8px 0" }}>
+                  <Space align="start" style={{ width: "100%", justifyContent: m.author === "me" ? "flex-end" : "flex-start" }}>
+                    {m.author === "bot" && <Avatar icon={<UserOutlined />} />}
+                    <div style={{ flex: 1, maxWidth: "100%", background: m.author === "me" ? "#1677ff" : "#fff", color: m.author === "me" ? "#fff" : "inherit", border: "1px solid #f0f0f0", padding: "12px 14px", borderRadius: 10, boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
+                      <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 4, fontWeight: 500 }}>
+                        {m.author === "me" ? "Bạn" : "Bot"}
+                      </div>
+                      <Typography.Text style={{ color: m.author === "me" ? "#fff" : undefined }}>{m.content}</Typography.Text>
+                      {m.attachments && m.attachments.length > 0 && (
+                        <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {m.attachments.map((a, i) => (
+                            <div key={i} style={{ background: m.author === "me" ? "rgba(255,255,255,0.15)" : "#fafafa", borderRadius: 6, padding: 6, border: "1px solid #f0f0f0" }}>
+                              {a.url && a.type.startsWith("image/") ? (
+                                <Image src={a.url} width={120} height={120} style={{ objectFit: "cover" }} alt={a.name} />
+                              ) : (
+                                <Space>
+                                  <PaperClipOutlined />
+                                  <Typography.Text style={{ color: m.author === "me" ? "#fff" : undefined }}>{a.name}</Typography.Text>
+                                </Space>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ marginTop: 4, opacity: 0.6, fontSize: 12 }}>{m.time}</div>
+                    </div>
+                    {m.author === "me" && <Avatar style={{ backgroundColor: "#1677ff" }}>Me</Avatar>}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+
+          <div style={{ padding: 12, borderTop: "1px solid #f0f0f0", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ border: "1px solid #d9d9d9", borderRadius: 10, background: "#fff", overflow: "hidden" }}>
+              {attachments.length > 0 && (
+                <div style={{ padding: 10, borderBottom: "1px solid #f0f0f0", background: "#fff" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {attachments.map((a, idx) => (
+                      <div key={idx} style={{ position: "relative", border: "1px solid #f0f0f0", borderRadius: 8, padding: 6, background: "#fff" }}>
+                        {a.previewUrl ? (
+                          <Image src={a.previewUrl} width={96} height={96} style={{ objectFit: "cover" }} alt={a.file.name} />
+                        ) : (
+                          <Tag icon={<PaperClipOutlined />} color="default" style={{ padding: 6, margin: 0 }}>{a.file.name}</Tag>
+                        )}
+                        <Button size="small" type="text" icon={<CloseOutlined />} onClick={() => removeAttachment(idx)} style={{ position: "absolute", top: -10, right: -10 }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Input.TextArea
+                placeholder="Nhập tin nhắn..."
+                autoSize={{ minRows: 4, maxRows: 8 }}
+                value={input}
+                bordered={false}
+                onChange={(e) => setInput(e.target.value)}
+                onPressEnter={(e) => { if (!e.shiftKey) { e.preventDefault(); sendText(); } }}
+                style={{ padding: 12, lineHeight: 1.5, resize: "none" as any }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, borderTop: "1px solid #f0f0f0", background: "#fff" }}>
+                <Upload beforeUpload={onPickFile} multiple showUploadList={false}>
+                  <Button type="text" icon={<PaperClipOutlined />} aria-label="Đính kèm">Đính kèm</Button>
+                </Upload>
+                <div style={{ flex: 1 }} />
+                <Button type="primary" icon={<SendOutlined />} onClick={sendText}>Gửi</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Drawer>
     </div>
   );
 }
