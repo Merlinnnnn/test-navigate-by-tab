@@ -10,11 +10,16 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.4.0",
     "antd": "^5.27.5",
     "dayjs": "^1.11.18",
     "next": "15.5.5",
+    "occt-import-js": "^0.0.23",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "three": "^0.180.0",
+    "three-stdlib": "^2.36.0",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
