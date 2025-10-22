@@ -37,7 +37,12 @@ function DropZone({ onFile }: { onFile: (file: File) => void }) {
       </div>
       <label className="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm cursor-pointer shadow">
         Choose file
-        <input type="file" accept=".glb,.gltf,.stl,.obj,.step,.stp" className="hidden" onChange={onChange} />
+        <input
+          type="file"
+          accept=".glb,.gltf,.stl,.obj,.step,.stp"
+          className="hidden"
+          onChange={onChange}
+        />
       </label>
     </div>
   );
@@ -47,10 +52,34 @@ function Toolbar({ onReset, fileName }: { onReset: () => void; fileName?: string
   return (
     <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white shadow border border-gray-200">
       <div className="text-sm text-gray-600 truncate">
-        {fileName ? <><span className="font-medium">Loaded:</span> {fileName}</> : "No file loaded"}
+        {fileName ? (
+          <>
+            <span className="font-medium">Loaded:</span> {fileName}
+          </>
+        ) : (
+          "No file loaded"
+        )}
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={onReset} className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm">Clear</button>
+        <button
+          onClick={() => {
+            // Reset camera to default position
+            const canvas = document.querySelector('canvas');
+            if (canvas) {
+              const event = new CustomEvent('reset-camera');
+              canvas.dispatchEvent(event);
+            }
+          }}
+          className="px-3 py-2 rounded-xl bg-blue-100 hover:bg-blue-200 text-blue-700 text-sm"
+        >
+          Reset View
+        </button>
+        <button
+          onClick={onReset}
+          className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm"
+        >
+          Clear
+        </button>
       </div>
     </div>
   );
@@ -88,26 +117,40 @@ function GLTFModel({ url }: { url: string }) {
 
 function STLModel({ url }: { url: string }) {
   const geometry = useLoader(STLLoader, url);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({ metalness: 0.1, roughness: 0.6 }), []);
+  const material = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        metalness: 0.1,
+        roughness: 0.6,
+      }),
+    []
+  );
   // STL may have huge units; scale is handled by Bounds fit below
   return (
     <Center>
-      <mesh geometry={geometry} material={material} />
+      <mesh geometry={geometry} material={material} castShadow receiveShadow />
     </Center>
   );
 }
 
 function OBJModel({ url }: { url: string }) {
   const obj = useLoader(OBJLoader, url);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({ metalness: 0.1, roughness: 0.6 }), []);
+  const material = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        metalness: 0.1,
+        roughness: 0.6,
+      }),
+    []
+  );
   // Apply material to all meshes in the OBJ
-  useEffect(() => {
   obj.traverse((child) => {
     if ((child as THREE.Mesh).isMesh) {
-        (child as THREE.Mesh).material = material;
+      (child as THREE.Mesh).material = material;
+      (child as THREE.Mesh).castShadow = true;
+      (child as THREE.Mesh).receiveShadow = true;
     }
   });
-  }, [obj, material]);
   return (
     <Center>
       <primitive object={obj} />
@@ -123,19 +166,26 @@ function StepModel({ geometry }: { geometry: THREE.Group }) {
   );
 }
 
-// ---------- Main 3D Scene ----------
-function Scene({ fileUrl, fileType, stepGeometry }: { fileUrl: string; fileType: string; stepGeometry?: THREE.Group | null }) {
+function Scene({
+  fileUrl,
+  fileType,
+  stepGeometry,
+}: {
+  fileUrl: string;
+  fileType: string;
+  stepGeometry?: THREE.Group | null;
+}) {
   const renderModel = () => {
     switch (fileType.toLowerCase()) {
-      case 'glb':
-      case 'gltf':
+      case "glb":
+      case "gltf":
         return <GLTFModel url={fileUrl} />;
-      case 'stl':
+      case "stl":
         return <STLModel url={fileUrl} />;
-      case 'obj':
+      case "obj":
         return <OBJModel url={fileUrl} />;
-      case 'step':
-      case 'stp':
+      case "step":
+      case "stp":
         return stepGeometry ? <StepModel geometry={stepGeometry} /> : null;
       default:
         return null;
@@ -157,12 +207,17 @@ function Scene({ fileUrl, fileType, stepGeometry }: { fileUrl: string; fileType:
         enableRotate={true}
         minDistance={1}
         maxDistance={100}
+        // Add auto-rotation for better viewing
+        autoRotate={false}
+        autoRotateSpeed={0.5}
+        // Enable damping for smoother controls
+        enableDamping={true}
+        dampingFactor={0.05}
       />
     </>
   );
 }
 
-// ---------- Main Component ----------
 export default function ThreeDViewer() {
   const [fileUrl, setFileUrl] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
@@ -170,79 +225,73 @@ export default function ThreeDViewer() {
   const [error, setError] = useState<string>("");
   const [stepGeometry, setStepGeometry] = useState<THREE.Group | null>(null);
   const [isConverting, setIsConverting] = useState(false);
+  const [currentFile, setCurrentFile] = useState<File | null>(null);
 
-  const handleFile = useCallback(async (file: File) => {
-    setError("");
-    setIsConverting(false);
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    
-    // Check if it's a STEP file
-    if (isStepFile(file)) {
-      setIsConverting(true);
-      try {
-        console.log('Converting STEP file:', file.name);
-        
-        // Try GLB conversion first (more efficient)
-        try {
-          const glbBlob = await stepConverter.convertStepToGLB(file);
-          const url = URL.createObjectURL(glbBlob);
-          setFileUrl(url);
-          setFileName(file.name);
-          setFileType('glb');
-          setStepGeometry(null);
-          console.log('STEP converted to GLB successfully');
-        } catch (glbError) {
-          console.log('GLB conversion failed, trying OBJ:', glbError);
-          
-          // Fallback to OBJ conversion
-          try {
-            const objString = await stepConverter.convertStepToOBJ(file);
-            const geometry = stepConverter.createGeometryFromOBJ(objString);
-            setStepGeometry(geometry);
-            setFileUrl(""); // No URL needed for STEP geometry
-            setFileName(file.name);
-            setFileType('step');
-            console.log('STEP converted to OBJ successfully');
-          } catch (objError) {
-            console.log('OBJ conversion failed:', objError);
-            throw objError;
-          }
-        }
-      } catch (error) {
-        console.error('STEP conversion failed:', error);
-        setError(`Failed to convert STEP file: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        setIsConverting(false);
-        return;
-      }
+  const handleFile = useCallback(
+    async (file: File) => {
+      setError("");
       setIsConverting(false);
-    } else {
-      // Handle other file types
-      if (!['glb', 'gltf', 'stl', 'obj'].includes(ext)) {
-        setError(`Unsupported file format: .${ext}. Please use .glb, .gltf, .stl, .obj, or .step files.`);
-        return;
-      }
+      setCurrentFile(file);
+      const ext = file.name.split(".").pop()?.toLowerCase() || "";
 
-      const url = URL.createObjectURL(file);
+      // Check if it's a STEP file
+      if (isStepFile(file)) {
+        setIsConverting(true);
+        try {
+          console.log("Parsing STEP file:", file.name);
+
+          // Parse STEP file directly to Three.js Group
+          const group = await stepConverter.parseStepToGroup(file);
+          setStepGeometry(group); // <-- dùng Group thật từ STEP
+          setFileUrl(""); // không cần URL
+          setFileName(file.name);
+          setFileType("step"); // để Scene chọn StepModel
+          console.log("STEP parsed successfully");
+        } catch (error) {
+          console.error("STEP parsing failed:", error);
+          setError(
+            `Failed to parse STEP file: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`
+          );
+          setIsConverting(false);
+          return;
+        }
+        setIsConverting(false);
+      } else {
+        // Handle other file types
+        if (!["glb", "gltf", "stl", "obj"].includes(ext)) {
+          setError(
+            `Unsupported file format: .${ext}. Please use .glb, .gltf, .stl, .obj, or .step files.`
+          );
+          return;
+        }
+
+        const url = URL.createObjectURL(file);
     setFileUrl(url);
-      setFileName(file.name);
-      setFileType(ext);
-      setStepGeometry(null);
-    }
-  }, []);
+        setFileName(file.name);
+        setFileType(ext);
+        setStepGeometry(null);
+      }
+    },
+    []
+  );
 
   const handleReset = useCallback(() => {
     if (fileUrl) {
       URL.revokeObjectURL(fileUrl);
     }
+    // Dispose STEP geometry
+    stepConverter.disposeGroup(stepGeometry || undefined);
     setFileUrl("");
     setFileName("");
     setFileType("");
     setError("");
     setStepGeometry(null);
     setIsConverting(false);
-  }, [fileUrl]);
+    setCurrentFile(null); // Reset current file
+  }, [fileUrl, stepGeometry]);
 
-  // Cleanup URLs on unmount
   useEffect(() => {
     return () => {
       if (fileUrl) {
@@ -254,7 +303,7 @@ export default function ThreeDViewer() {
   return (
     <div className="w-full h-full flex flex-col gap-4">
         <DropZone onFile={handleFile} />
-      
+
       {error && (
         <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
           {error}
@@ -263,27 +312,44 @@ export default function ThreeDViewer() {
 
       {isConverting && (
         <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-          Converting STEP file... This may take a moment.
+          <div className="font-medium">Parsing STEP file...</div>
+          <div className="text-xs opacity-75 mt-1">
+            File: {fileName} | Size:{" "}
+            {currentFile?.size ? `${(currentFile.size / 1024 / 1024).toFixed(1)} MB` : "Unknown"}
+          </div>
+          <div className="text-xs opacity-75">
+            Large files may take 30-60 seconds. Please wait...
+          </div>
+          <div className="mt-2 w-full bg-blue-200 rounded-full h-1">
+            <div className="bg-blue-600 h-1 rounded-full animate-pulse" style={{width: '100%'}}></div>
+          </div>
         </div>
       )}
-      
+
       <Toolbar onReset={handleReset} fileName={fileName} />
-      
+
       <div className="flex-1 rounded-2xl overflow-hidden bg-gray-100 border border-gray-200">
-        {(fileUrl || stepGeometry) ? (
+        {fileUrl || stepGeometry ? (
           <Canvas
-            camera={{ position: [5, 5, 5], fov: 50 }}
-            style={{ width: '100%', height: '100%' }}
+            gl={{ antialias: true, logarithmicDepthBuffer: true }}
+            camera={{ position: [5, 5, 5], fov: 50, near: 0.01, far: 1e7 }}
+            style={{ width: "100%", height: "100%" }}
           >
             <Suspense fallback={<LoadingOverlay />}>
-              <Scene fileUrl={fileUrl} fileType={fileType} stepGeometry={stepGeometry || undefined} />
+              <Scene
+                fileUrl={fileUrl}
+                fileType={fileType}
+                stepGeometry={stepGeometry || undefined}
+              />
             </Suspense>
           </Canvas>
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-500">
             <div className="text-center">
               <div className="text-lg font-medium mb-2">No 3D file loaded</div>
-              <div className="text-sm">Upload a .glb, .gltf, .stl, .obj, or .step file to start viewing</div>
+              <div className="text-sm">
+                Upload a .glb, .gltf, .stl, .obj, or .step file to start viewing
+              </div>
             </div>
           </div>
         )}
