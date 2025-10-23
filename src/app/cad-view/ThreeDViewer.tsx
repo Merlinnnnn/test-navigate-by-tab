@@ -48,7 +48,11 @@ function DropZone({ onFile }: { onFile: (file: File) => void }) {
   );
 }
 
-function Toolbar({ onReset, fileName }: { onReset: () => void; fileName?: string }) {
+function Toolbar({ onReset, fileName, onFixOrientation }: { 
+  onReset: () => void; 
+  fileName?: string;
+  onFixOrientation?: () => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white shadow border border-gray-200">
       <div className="text-sm text-gray-600 truncate">
@@ -74,6 +78,14 @@ function Toolbar({ onReset, fileName }: { onReset: () => void; fileName?: string
         >
           Reset View
         </button>
+        {onFixOrientation && (
+          <button
+            onClick={onFixOrientation}
+            className="px-3 py-2 rounded-xl bg-green-100 hover:bg-green-200 text-green-700 text-sm"
+          >
+            Fix Orientation
+          </button>
+        )}
         <button
           onClick={onReset}
           className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm"
@@ -159,11 +171,8 @@ function OBJModel({ url }: { url: string }) {
 }
 
 function StepModel({ geometry }: { geometry: THREE.Group }) {
-  return (
-    <Center>
-      <primitive object={geometry} />
-    </Center>
-  );
+  // ĐÃ center & orient từ StepConverter, nên render thẳng
+  return <primitive object={geometry} />;
 }
 
 function Scene({
@@ -175,6 +184,23 @@ function Scene({
   fileType: string;
   stepGeometry?: THREE.Group | null;
 }) {
+  // Calculate dynamic zoom limits based on model size
+  const getZoomLimits = useCallback(() => {
+    if (stepGeometry) {
+      const box = new THREE.Box3().setFromObject(stepGeometry);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      
+      // Set zoom limits based on model size
+      const minDistance = Math.max(0.001, maxDim * 0.01); // 1% of model size
+      const maxDistance = Math.max(10000, maxDim * 100); // 100x model size
+      
+      console.log('Model size:', maxDim, 'Zoom limits:', { minDistance, maxDistance });
+      return { minDistance, maxDistance };
+    }
+    return { minDistance: 0.01, maxDistance: 10000 };
+  }, [stepGeometry]);
   const renderModel = () => {
     switch (fileType.toLowerCase()) {
       case "glb":
@@ -192,10 +218,23 @@ function Scene({
     }
   };
 
+  const zoomLimits = getZoomLimits();
+
   return (
     <>
       <ambientLight intensity={0.4} />
-      <directionalLight position={[10, 10, 5]} intensity={1} />
+      <directionalLight 
+        position={[10, 10, 5]} 
+        intensity={1}
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={50}
+        shadow-camera-left={-10}
+        shadow-camera-right={10}
+        shadow-camera-top={10}
+        shadow-camera-bottom={-10}
+      />
       <Environment preset="studio" />
       <Grid args={[10, 10]} position={[0, 0, 0]} />
       <Bounds fit clip observe margin={1.2}>
@@ -205,14 +244,23 @@ function Scene({
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
-        minDistance={1}
-        maxDistance={100}
+        minDistance={zoomLimits.minDistance}
+        maxDistance={zoomLimits.maxDistance}
         // Add auto-rotation for better viewing
         autoRotate={false}
         autoRotateSpeed={0.5}
         // Enable damping for smoother controls
         enableDamping={true}
         dampingFactor={0.05}
+        // Smooth zoom with better limits
+        zoomSpeed={1.5}
+        panSpeed={1.0}
+        rotateSpeed={1.0}
+        // Better zoom limits based on model size
+        minPolarAngle={0}
+        maxPolarAngle={Math.PI}
+        // Allow more aggressive zoom
+        zoomToCursor={true}
       />
     </>
   );
@@ -226,6 +274,8 @@ export default function ThreeDViewer() {
   const [stepGeometry, setStepGeometry] = useState<THREE.Group | null>(null);
   const [isConverting, setIsConverting] = useState(false);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
+  const [conversionProgress, setConversionProgress] = useState(0);
+  const [conversionStage, setConversionStage] = useState("");
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -237,6 +287,15 @@ export default function ThreeDViewer() {
       // Check if it's a STEP file
       if (isStepFile(file)) {
         setIsConverting(true);
+        setConversionProgress(0);
+        setConversionStage("Starting...");
+        
+        // Set up progress callback
+        stepConverter.setProgressCallback((progress: number, stage: string) => {
+          setConversionProgress(progress);
+          setConversionStage(stage);
+        });
+        
         try {
           console.log("Parsing STEP file:", file.name);
 
@@ -255,9 +314,13 @@ export default function ThreeDViewer() {
             }`
           );
           setIsConverting(false);
+          setConversionProgress(0);
+          setConversionStage("");
           return;
         }
         setIsConverting(false);
+        setConversionProgress(0);
+        setConversionStage("");
       } else {
         // Handle other file types
         if (!["glb", "gltf", "stl", "obj"].includes(ext)) {
@@ -277,6 +340,25 @@ export default function ThreeDViewer() {
     []
   );
 
+  const handleFixOrientation = useCallback(() => {
+    if (!stepGeometry) return;
+
+    // Toggle giữa 0 và -90° quanh X
+    const almostEqual = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) < eps;
+    const isZUp = almostEqual(stepGeometry.rotation.x, 0);
+
+    const rot = isZUp ? -Math.PI / 2 : 0;
+    stepGeometry.rotation.set(rot, 0, 0);
+
+    stepGeometry.updateMatrixWorld(true);
+    // Sau xoay, đặt lại đáy chạm sàn
+    const box = new THREE.Box3().setFromObject(stepGeometry);
+    stepGeometry.position.y -= box.min.y;
+    stepGeometry.updateMatrixWorld(true);
+    
+    console.log('Orientation toggled:', isZUp ? 'Y-up' : 'Z-up');
+  }, [stepGeometry]);
+
   const handleReset = useCallback(() => {
     if (fileUrl) {
       URL.revokeObjectURL(fileUrl);
@@ -290,6 +372,8 @@ export default function ThreeDViewer() {
     setStepGeometry(null);
     setIsConverting(false);
     setCurrentFile(null); // Reset current file
+    setConversionProgress(0);
+    setConversionStage("");
   }, [fileUrl, stepGeometry]);
 
   useEffect(() => {
@@ -317,23 +401,46 @@ export default function ThreeDViewer() {
             File: {fileName} | Size:{" "}
             {currentFile?.size ? `${(currentFile.size / 1024 / 1024).toFixed(1)} MB` : "Unknown"}
           </div>
-          <div className="text-xs opacity-75">
-            Large files may take 30-60 seconds. Please wait...
+          <div className="text-xs opacity-75 mt-1">
+            Stage: {conversionStage}
           </div>
-          <div className="mt-2 w-full bg-blue-200 rounded-full h-1">
-            <div className="bg-blue-600 h-1 rounded-full animate-pulse" style={{width: '100%'}}></div>
+          <div className="mt-2 w-full bg-blue-200 rounded-full h-2">
+            <div 
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" 
+              style={{width: `${conversionProgress}%`}}
+            ></div>
+          </div>
+          <div className="text-xs opacity-75 mt-1 text-right">
+            {conversionProgress.toFixed(0)}%
           </div>
         </div>
       )}
 
-      <Toolbar onReset={handleReset} fileName={fileName} />
+      <Toolbar 
+        onReset={handleReset} 
+        fileName={fileName} 
+        onFixOrientation={stepGeometry ? handleFixOrientation : undefined}
+      />
 
       <div className="flex-1 rounded-2xl overflow-hidden bg-gray-100 border border-gray-200">
         {fileUrl || stepGeometry ? (
           <Canvas
-            gl={{ antialias: true, logarithmicDepthBuffer: true }}
-            camera={{ position: [5, 5, 5], fov: 50, near: 0.01, far: 1e7 }}
+            gl={{ 
+              antialias: true, 
+              logarithmicDepthBuffer: true,
+              powerPreference: "high-performance",
+              alpha: false,
+              preserveDrawingBuffer: false
+            }}
+            camera={{ 
+              position: [5, 5, 5], 
+              fov: 50, 
+              near: 0.001, 
+              far: 1e8 
+            }}
             style={{ width: "100%", height: "100%" }}
+            performance={{ min: 0.5 }}
+            dpr={[1, 2]}
           >
             <Suspense fallback={<LoadingOverlay />}>
               <Scene

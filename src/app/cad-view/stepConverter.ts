@@ -10,6 +10,7 @@ export class StepConverter {
   private occt: any = null;
   private stepToGlb: StepToGlbFn | null = null;
   private readStep: ReadStepFn | null = null;
+  private progressCallback?: (progress: number, stage: string) => void;
 
   async initialize() {
     if (this.isInitialized) return;
@@ -106,17 +107,25 @@ export class StepConverter {
     }
   }
 
+  /** Set progress callback for streaming updates */
+  setProgressCallback(callback: (progress: number, stage: string) => void) {
+    this.progressCallback = callback;
+  }
+
   /** Parse STEP -> THREE.Group (để hiển thị trực tiếp) */
   async parseStepToGroup(stepFile: File): Promise<THREE.Group> {
     console.log('Starting STEP file parsing...', stepFile.name, stepFile.size);
+    this.progressCallback?.(5, 'Initializing OCCT...');
     await this.initialize();
 
+    this.progressCallback?.(10, 'Loading file...');
     const arrayBuffer = await stepFile.arrayBuffer();
     console.log('File loaded, arrayBuffer size:', arrayBuffer.byteLength);
 
     // Nhánh 1: STEP -> GLB -> GLTFLoader
     if (this.stepToGlb) {
       console.log('Using stepToGlb method...');
+      this.progressCallback?.(15, 'Converting STEP to GLB...');
       
       const parsePromise = this.stepToGlb(arrayBuffer, {
         // nếu lib có thông số: linearDeflection, angularDeflection...
@@ -128,6 +137,7 @@ export class StepConverter {
       );
       
       const glbBuf = await Promise.race([parsePromise, parseTimeoutPromise]);
+      this.progressCallback?.(60, 'GLB conversion completed');
 
       // Handle both ArrayBuffer and Uint8Array
       console.log('GLB conversion result type:', typeof glbBuf, glbBuf instanceof ArrayBuffer ? 'ArrayBuffer' : 'Uint8Array');
@@ -136,6 +146,7 @@ export class StepConverter {
       const url = URL.createObjectURL(blob);
       console.log('Created GLB blob, size:', blob.size);
 
+      this.progressCallback?.(70, 'Loading GLTF...');
       const gltf = await new Promise<any>((resolve, reject) => {
         const loader = new GLTFLoader();
         loader.load(url, resolve, undefined, reject);
@@ -144,16 +155,22 @@ export class StepConverter {
       URL.revokeObjectURL(url);
       console.log('GLTF loaded successfully');
 
+      this.progressCallback?.(85, 'Processing geometry...');
       const group = new THREE.Group();
       if (gltf.scene) group.add(gltf.scene);
-      this.centerOnGround(group);
+      
+      // Chuẩn hóa trục Z-up -> Y-up rồi căn
+      this.orientAndCenter(group, 'Z');
       console.log('Created THREE.Group with', group.children.length, 'children');
+      
+      this.progressCallback?.(100, 'Complete');
       return group;
     }
 
     // Nhánh 2: STEP -> meshes (vertices/indices)
     if (this.readStep) {
       console.log('Using readStep method...');
+      this.progressCallback?.(20, 'Parsing STEP file...');
       const u8 = new Uint8Array(arrayBuffer);
       
       try {
@@ -165,12 +182,14 @@ export class StepConverter {
         
         console.log('Starting STEP parsing with timeout...');
         const res = await Promise.race([parsePromise, parseTimeoutPromise]);
+        this.progressCallback?.(50, 'STEP parsing completed');
         console.log('OCCT ReadStepFile result:', res);
 
         if (!res || !(res as any).meshes?.length) {
           throw new Error('OCCT returned empty result for this STEP file');
         }
 
+        this.progressCallback?.(60, 'Creating 3D geometry...');
         const group = new THREE.Group();
         
         // Debug: Log mesh structure
@@ -181,7 +200,22 @@ export class StepConverter {
           (res as any).meshes[0]?.indices?.length ?? (res as any).meshes[0]?.index?.array?.length);
         
         // Handle meshes format - support both schema A and B
-        for (const m of (res as any).meshes) {
+        const meshes = (res as any).meshes;
+        const totalMeshes = meshes.length;
+        
+        // Process meshes in batches to avoid blocking the UI
+        const batchSize = Math.max(1, Math.floor(totalMeshes / 10)); // Process in ~10 batches
+        
+        for (let i = 0; i < meshes.length; i++) {
+          const m = meshes[i];
+          const progress = 60 + (i / totalMeshes) * 30; // 60-90%
+          this.progressCallback?.(progress, `Processing mesh ${i + 1}/${totalMeshes}...`);
+          
+          // Yield control to browser every batch
+          if (i % batchSize === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+          
           const geom = new THREE.BufferGeometry();
 
           // Get positions - support both schema A and B
@@ -239,11 +273,29 @@ export class StepConverter {
             roughness: 0.6,
             // Enable DoubleSide to handle backface issues
             side: THREE.DoubleSide,
+            // Optimize for performance
+            transparent: false,
+            alphaTest: 0,
+            depthWrite: true,
+            depthTest: true,
           });
 
           const mesh = new THREE.Mesh(geom, mat);
           mesh.name = m.name ?? 'STEP_Part';
           mesh.castShadow = mesh.receiveShadow = true;
+          
+          // Optimize geometry for performance
+          geom.computeBoundingBox();
+          geom.computeBoundingSphere();
+          
+          // Dispose of original data to free memory
+          if (m.vertices && !(m.vertices instanceof Float32Array)) {
+            (m.vertices as any) = null;
+          }
+          if (m.indices && !(m.indices instanceof Uint32Array)) {
+            (m.indices as any) = null;
+          }
+          
           group.add(mesh);
         }
         
@@ -266,12 +318,16 @@ export class StepConverter {
           group.scale.setScalar(scale);
         }
         
-        this.centerOnGround(group);
+        this.progressCallback?.(95, 'Finalizing geometry...');
+        
+        // Chuẩn hóa trục Z-up -> Y-up rồi căn
+        this.orientAndCenter(group, 'Z');
         
         // Debug bbox after centering
         const finalBox = new THREE.Box3().setFromObject(group);
         console.log('bbox min/max after centering:', finalBox.min, finalBox.max);
         
+        this.progressCallback?.(100, 'Complete');
         return group;
       } catch (error) {
         console.error('OCCT ReadStepFile error:', error);
@@ -281,7 +337,10 @@ export class StepConverter {
 
     // Fallback: tạo geometry đơn giản khi OCCT không hoạt động
     console.warn('No STEP parser available, creating fallback geometry');
-    return this.createFallbackGeometry(stepFile);
+    this.progressCallback?.(50, 'Creating fallback geometry...');
+    const fallbackGroup = this.createFallbackGeometry(stepFile);
+    this.progressCallback?.(100, 'Complete');
+    return fallbackGroup;
   }
 
   /** Create fallback geometry when OCCT is not available */
@@ -322,22 +381,41 @@ export class StepConverter {
     return group;
   }
 
-  /** Center geometry on ground plane */
-  private centerOnGround(group: THREE.Group): void {
+  /** Map Z-up -> Y-up (chuẩn Three.js), rồi căn sàn và tâm ngang */
+  private orientAndCenter(group: THREE.Group, sourceUp: 'Z'|'Y' = 'Z'): void {
+    // 1) Đưa về Y-up nếu nguồn là Z-up
+    if (sourceUp === 'Z') {
+      // Z (nguồn) -> Y (Three): xoay -90° quanh trục X
+      group.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    }
+
+    // 2) Bắt buộc cập nhật matrix trước khi tính bbox
+    group.updateMatrixWorld(true);
+
+    // 3) Căn tâm ngang và đặt đáy chạm sàn (y=0)
     const box = new THREE.Box3().setFromObject(group);
-    const c = box.getCenter(new THREE.Vector3());
-    
-    // Center horizontally
+    const c   = box.getCenter(new THREE.Vector3());
+
+    // Đưa tâm XZ về gốc
     group.position.x -= c.x;
     group.position.z -= c.z;
-    
-    // Place bottom on ground (y=0) - but don't flip orientation
+
+    // Đặt đáy chạm y=0
     group.position.y -= box.min.y;
-    
-    // Optional: Rotate to fix orientation if needed
-    // Uncomment these lines if model appears upside down or sideways:
-    // group.rotation.x = Math.PI / 2; // Rotate 90 degrees around X axis
-    // group.rotation.z = Math.PI;     // Rotate 180 degrees around Z axis
+
+    // Cập nhật lại
+    group.updateMatrixWorld(true);
+  }
+
+  /** Center geometry on ground plane (chỉ căn sàn + tâm, không xoay) */
+  private centerOnGround(group: THREE.Group): void {
+    group.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(group);
+    const c   = box.getCenter(new THREE.Vector3());
+    group.position.x -= c.x;
+    group.position.z -= c.z;
+    group.position.y -= box.min.y;
+    group.updateMatrixWorld(true);
   }
 
   /** (Tuỳ chọn) Xuất GLB từ group nếu bạn muốn lưu/stream GLB */

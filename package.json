@@ -13,6 +13,7 @@
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.4.0",
     "antd": "^5.27.5",
+    "comlink": "^4.4.2",
     "dayjs": "^1.11.18",
     "next": "15.5.5",
     "occt-import-js": "^0.0.23",
