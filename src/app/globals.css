@@ -47,3 +47,25 @@ body {
 .tn-input--money {
   font-variant-numeric: tabular-nums;
 }
+
+/* PI Mention Styles */
+.pi-mention {
+  background-color: #e6f7ff !important;
+  border-color: #91d5ff !important;
+  color: #1890ff !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.pi-mention:hover {
+  background-color: #bae7ff !important;
+  border-color: #40a9ff !important;
+  color: #096dd9 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2) !important;
+}
+
+.pi-mention:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(24, 144, 255, 0.3) !important;
+}
