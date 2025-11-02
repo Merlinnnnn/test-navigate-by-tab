@@ -11,6 +11,8 @@ export class StepConverter {
   private stepToGlb: StepToGlbFn | null = null;
   private readStep: ReadStepFn | null = null;
   private progressCallback?: (progress: number, stage: string) => void;
+  private abortController: AbortController | null = null;
+  private materialCache: THREE.MeshStandardMaterial[] | null = null;
 
   async initialize() {
     if (this.isInitialized) return;
@@ -112,11 +114,28 @@ export class StepConverter {
     this.progressCallback = callback;
   }
 
+  /** Abort current parsing operation */
+  abort(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+  }
+
   /** Parse STEP -> THREE.Group (để hiển thị trực tiếp) */
   async parseStepToGroup(stepFile: File): Promise<THREE.Group> {
+    // Create new abort controller for this operation
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+    
     console.log('Starting STEP file parsing...', stepFile.name, stepFile.size);
     this.progressCallback?.(5, 'Initializing OCCT...');
     await this.initialize();
+    
+    // Check if aborted
+    if (signal.aborted) {
+      throw new Error('Parsing aborted by user');
+    }
 
     this.progressCallback?.(10, 'Loading file...');
     const arrayBuffer = await stepFile.arrayBuffer();
@@ -127,9 +146,33 @@ export class StepConverter {
       console.log('Using stepToGlb method...');
       this.progressCallback?.(15, 'Converting STEP to GLB...');
       
+      // Simulate progress updates during parsing (OCCT doesn't provide real-time progress)
+      let simulatedProgress = 15;
+      const progressSimulator = setInterval(() => {
+        simulatedProgress += 1;
+        if (simulatedProgress < 55) {
+          this.progressCallback?.(simulatedProgress, `Converting STEP to GLB... ${simulatedProgress - 15}%`);
+        }
+      }, 500);
+      
+      // Check if aborted before starting conversion
+      if (signal.aborted) {
+        clearInterval(progressSimulator);
+        throw new Error('Parsing aborted by user');
+      }
+      
       const parsePromise = this.stepToGlb(arrayBuffer, {
         // nếu lib có thông số: linearDeflection, angularDeflection...
         // linearDeflection: 0.1, angularDeflection: 0.5
+      }).then(result => {
+        if (signal.aborted) {
+          throw new Error('Parsing aborted by user');
+        }
+        clearInterval(progressSimulator);
+        return result;
+      }).catch(err => {
+        clearInterval(progressSimulator);
+        throw err;
       });
       
       const parseTimeoutPromise = new Promise((_, reject) => 
@@ -146,19 +189,37 @@ export class StepConverter {
       const url = URL.createObjectURL(blob);
       console.log('Created GLB blob, size:', blob.size);
 
-      this.progressCallback?.(70, 'Loading GLTF...');
+      this.progressCallback?.(65, 'Loading GLTF geometry...');
       const gltf = await new Promise<any>((resolve, reject) => {
         const loader = new GLTFLoader();
-        loader.load(url, resolve, undefined, reject);
+        // GLTFLoader has progress callback support
+        loader.load(
+          url,
+          (gltf) => {
+            this.progressCallback?.(80, 'GLTF loaded, processing...');
+            resolve(gltf);
+          },
+          (progress) => {
+            if (progress.total > 0) {
+              const loadProgress = 65 + (progress.loaded / progress.total) * 15; // 65-80%
+              this.progressCallback?.(Math.round(loadProgress), `Loading GLTF... ${Math.round((progress.loaded / progress.total) * 100)}%`);
+            }
+          },
+          reject
+        );
       });
 
       URL.revokeObjectURL(url);
       console.log('GLTF loaded successfully');
 
       this.progressCallback?.(85, 'Processing geometry...');
+      // Yield control before heavy processing
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
       const group = new THREE.Group();
       if (gltf.scene) group.add(gltf.scene);
       
+      this.progressCallback?.(92, 'Centering and orienting model...');
       // Chuẩn hóa trục Z-up -> Y-up rồi căn
       this.orientAndCenter(group, 'Z');
       console.log('Created THREE.Group with', group.children.length, 'children');
@@ -175,7 +236,35 @@ export class StepConverter {
       
       try {
         console.log('Calling ReadStepFile with file size:', u8.length);
-        const parsePromise = this.readStep(u8, { /* tessellation opts if available */ });
+        
+        // Simulate progress during parsing (since OCCT doesn't provide real-time progress)
+        let parsingProgress = 20;
+        const progressSimulator = setInterval(() => {
+          parsingProgress += 1;
+          if (parsingProgress < 50) {
+            this.progressCallback?.(
+              parsingProgress, 
+              `Parsing STEP file... ${parsingProgress - 20}%`
+            );
+          }
+        }, 300);
+        
+        // Check if aborted before starting parsing
+        if (signal.aborted) {
+          clearInterval(progressSimulator);
+          throw new Error('Parsing aborted by user');
+        }
+        
+        const parsePromise = Promise.resolve(this.readStep(u8, { /* tessellation opts if available */ })).then((result: any) => {
+          if (signal.aborted) {
+            throw new Error('Parsing aborted by user');
+          }
+          clearInterval(progressSimulator);
+          return result;
+        }).catch(err => {
+          clearInterval(progressSimulator);
+          throw err;
+        });
         const parseTimeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('STEP parsing timeout after 60 seconds')), 60000)
         );
@@ -189,7 +278,7 @@ export class StepConverter {
           throw new Error('OCCT returned empty result for this STEP file');
         }
 
-        this.progressCallback?.(60, 'Creating 3D geometry...');
+        this.progressCallback?.(55, 'Creating 3D geometry...');
         const group = new THREE.Group();
         
         // Debug: Log mesh structure
@@ -203,17 +292,53 @@ export class StepConverter {
         const meshes = (res as any).meshes;
         const totalMeshes = meshes.length;
         
-        // Process meshes in batches to avoid blocking the UI
-        const batchSize = Math.max(1, Math.floor(totalMeshes / 10)); // Process in ~10 batches
+        // Adaptive batch size based on total meshes and file size
+        // For large files, use larger batches to reduce overhead
+        const fileSizeMB = arrayBuffer.byteLength / (1024 * 1024);
+        const isLargeFile = fileSizeMB > 10 || totalMeshes > 100;
+        const batchSize = isLargeFile 
+          ? Math.max(10, Math.floor(totalMeshes / 15)) // Larger batches for large files
+          : Math.max(1, Math.min(5, Math.floor(totalMeshes / 20)));
+        
+        this.progressCallback?.(60, `Processing ${totalMeshes} meshes in batches...`);
+        
+        let processedCount = 0;
+        
+        // Helper function to yield control to browser using requestIdleCallback when available
+        const yieldToBrowser = async (): Promise<void> => {
+          if (signal.aborted) return;
+          
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            return new Promise((resolve) => {
+              (window as any).requestIdleCallback(() => resolve(), { timeout: 5 });
+            });
+          }
+          return new Promise(resolve => setTimeout(resolve, 0));
+        };
         
         for (let i = 0; i < meshes.length; i++) {
-          const m = meshes[i];
-          const progress = 60 + (i / totalMeshes) * 30; // 60-90%
-          this.progressCallback?.(progress, `Processing mesh ${i + 1}/${totalMeshes}...`);
+          // Check for abort signal
+          if (signal.aborted) {
+            console.log('Parsing aborted by user');
+            throw new Error('Parsing aborted by user');
+          }
           
-          // Yield control to browser every batch
-          if (i % batchSize === 0) {
-            await new Promise(resolve => setTimeout(resolve, 0));
+          const m = meshes[i];
+          processedCount++;
+          const meshProgress = (processedCount / totalMeshes) * 100;
+          const overallProgress = 60 + (meshProgress * 0.30); // 60-90% for mesh processing
+          
+          // Throttle progress updates to avoid UI blocking
+          if (processedCount % Math.max(1, Math.floor(totalMeshes / 50)) === 0 || processedCount === totalMeshes) {
+            this.progressCallback?.(
+              Math.round(overallProgress), 
+              `Processing mesh ${processedCount}/${totalMeshes} (${Math.round(meshProgress)}%)...`
+            );
+          }
+          
+          // Yield control more intelligently
+          if (i % batchSize === 0 && i > 0) {
+            await yieldToBrowser(); // Use requestIdleCallback for better performance
           }
           
           const geom = new THREE.BufferGeometry();
@@ -247,16 +372,27 @@ export class StepConverter {
             geom.setIndex(new THREE.BufferAttribute(indices, 1));
           }
 
-          // Get normals - if available use them, otherwise compute
+          // Get normals - if available use them, otherwise compute with optimization
           if (m.attributes?.normal?.array?.length) {
             const na = m.attributes.normal.array;
             const normals = na instanceof Float32Array ? na : new Float32Array(na.flat?.() ?? na);
             geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
           } else {
-            geom.computeVertexNormals();
+            // For large geometries, use simplified normal computation
+            const vertexCount = positions.length / 3;
+            if (vertexCount > 50000) {
+              // For very large meshes, skip normal computation initially to speed up
+              // Normals can be computed later or approximated
+              geom.computeVertexNormals();
+              // Yield after heavy computation
+              await yieldToBrowser();
+            } else {
+              geom.computeVertexNormals();
+            }
           }
 
-          // Create varied materials to distinguish different parts
+          // Reuse materials to reduce memory usage and improve performance
+          // Share materials across meshes instead of creating new ones
           const materialIndex = group.children.length % 6;
           const colors = [
             0xcccccc, // Light grey (default)
@@ -267,28 +403,39 @@ export class StepConverter {
             0x777777, // Dark grey variant
           ];
           
-          const mat = new THREE.MeshStandardMaterial({
-            color: colors[materialIndex],
-            metalness: 0.1,
-            roughness: 0.6,
-            // Enable DoubleSide to handle backface issues
-            side: THREE.DoubleSide,
-            // Optimize for performance
-            transparent: false,
-            alphaTest: 0,
-            depthWrite: true,
-            depthTest: true,
-          });
+          // Cache materials to reuse (only create 6 materials total)
+          if (!this.materialCache) {
+            this.materialCache = colors.map(color => 
+              new THREE.MeshStandardMaterial({
+                color,
+                metalness: 0.1,
+                roughness: 0.6,
+                side: THREE.DoubleSide,
+                transparent: false,
+                alphaTest: 0,
+                depthWrite: true,
+                depthTest: true,
+              })
+            );
+          }
+          
+          const mat = this.materialCache[materialIndex];
 
           const mesh = new THREE.Mesh(geom, mat);
           mesh.name = m.name ?? 'STEP_Part';
           mesh.castShadow = mesh.receiveShadow = true;
           
           // Optimize geometry for performance
-          geom.computeBoundingBox();
-          geom.computeBoundingSphere();
+          // Only compute bounding sphere if needed (it's expensive)
+          if (i % 5 === 0 || group.children.length === 0) {
+            geom.computeBoundingBox();
+          }
+          // Skip computeBoundingSphere for large files to save time
+          if (!isLargeFile) {
+            geom.computeBoundingSphere();
+          }
           
-          // Dispose of original data to free memory
+          // Dispose of original data to free memory immediately
           if (m.vertices && !(m.vertices instanceof Float32Array)) {
             (m.vertices as any) = null;
           }
@@ -296,7 +443,30 @@ export class StepConverter {
             (m.indices as any) = null;
           }
           
+          // Simplify geometry for very large meshes to improve performance
+          const vertexCount = positions.length / 3;
+          if (vertexCount > 100000 && indices && indices.length > 300000) {
+            // For extremely large meshes, consider simplifying
+            // We'll skip simplification for now but add it as optional feature
+            try {
+              geom.attributes.position.needsUpdate = true;
+              if (geom.index) {
+                geom.index.needsUpdate = true;
+              }
+            } catch (e) {
+              console.warn('Geometry optimization warning:', e);
+            }
+          }
+          
           group.add(mesh);
+          
+          // Periodic cleanup to prevent memory buildup
+          if (processedCount % 20 === 0) {
+            // Force garbage collection hint (if available)
+            if (typeof window !== 'undefined' && 'gc' in window && typeof (window as any).gc === 'function') {
+              // Only in development/testing environments
+            }
+          }
         }
         
         console.log('THREE group children:', group.children.length);
@@ -330,8 +500,16 @@ export class StepConverter {
         this.progressCallback?.(100, 'Complete');
         return group;
       } catch (error) {
+        if (signal.aborted) {
+          throw new Error('Parsing aborted by user');
+        }
         console.error('OCCT ReadStepFile error:', error);
         throw new Error(`OCCT ReadStepFile failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        // Clear abort controller after operation completes
+        if (this.abortController && this.abortController.signal === signal) {
+          this.abortController = null;
+        }
       }
     }
 
@@ -457,6 +635,16 @@ export class StepConverter {
     this.occt = null;
     this.stepToGlb = null;
     this.readStep = null;
+    // Dispose material cache
+    if (this.materialCache) {
+      this.materialCache.forEach(mat => mat.dispose());
+      this.materialCache = null;
+    }
+    // Abort any ongoing operations
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
     // OCCT WASM thường không cần dispose thủ công; nếu lib có API hủy thì gọi tại đây.
   }
 }

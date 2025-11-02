@@ -48,10 +48,9 @@ function DropZone({ onFile }: { onFile: (file: File) => void }) {
   );
 }
 
-function Toolbar({ onReset, fileName, onFixOrientation }: { 
+function Toolbar({ onReset, fileName }: { 
   onReset: () => void; 
   fileName?: string;
-  onFixOrientation?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white shadow border border-gray-200">
@@ -78,14 +77,6 @@ function Toolbar({ onReset, fileName, onFixOrientation }: {
         >
           Reset View
         </button>
-        {onFixOrientation && (
-          <button
-            onClick={onFixOrientation}
-            className="px-3 py-2 rounded-xl bg-green-100 hover:bg-green-200 text-green-700 text-sm"
-          >
-            Fix Orientation
-          </button>
-        )}
         <button
           onClick={onReset}
           className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm"
@@ -280,6 +271,16 @@ export default function ThreeDViewer() {
   const handleFile = useCallback(
     async (file: File) => {
       setError("");
+      
+      // Abort any ongoing conversion
+      stepConverter.abort();
+      
+      // Clear previous geometry to free memory
+      if (stepGeometry) {
+        stepConverter.disposeGroup(stepGeometry);
+        setStepGeometry(null);
+      }
+      
       setIsConverting(false);
       setCurrentFile(file);
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
@@ -290,10 +291,18 @@ export default function ThreeDViewer() {
         setConversionProgress(0);
         setConversionStage("Starting...");
         
-        // Set up progress callback
+        // Debounce progress updates to avoid UI blocking
+        let lastProgressUpdate = 0;
+        const progressThrottle = 50; // Update at most every 50ms
+        
+        // Set up progress callback with throttling
         stepConverter.setProgressCallback((progress: number, stage: string) => {
-          setConversionProgress(progress);
-          setConversionStage(stage);
+          const now = Date.now();
+          if (now - lastProgressUpdate >= progressThrottle || progress === 100) {
+            setConversionProgress(progress);
+            setConversionStage(stage);
+            lastProgressUpdate = now;
+          }
         });
         
         try {
@@ -308,11 +317,18 @@ export default function ThreeDViewer() {
           console.log("STEP parsed successfully");
         } catch (error) {
           console.error("STEP parsing failed:", error);
-          setError(
-            `Failed to parse STEP file: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
-          );
+          
+          // Don't show error if it was aborted
+          if (error instanceof Error && error.message.includes('aborted')) {
+            console.log("STEP parsing was cancelled");
+          } else {
+            setError(
+              `Failed to parse STEP file: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`
+            );
+          }
+          
           setIsConverting(false);
           setConversionProgress(0);
           setConversionStage("");
@@ -340,26 +356,10 @@ export default function ThreeDViewer() {
     []
   );
 
-  const handleFixOrientation = useCallback(() => {
-    if (!stepGeometry) return;
-
-    // Toggle giữa 0 và -90° quanh X
-    const almostEqual = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) < eps;
-    const isZUp = almostEqual(stepGeometry.rotation.x, 0);
-
-    const rot = isZUp ? -Math.PI / 2 : 0;
-    stepGeometry.rotation.set(rot, 0, 0);
-
-    stepGeometry.updateMatrixWorld(true);
-    // Sau xoay, đặt lại đáy chạm sàn
-    const box = new THREE.Box3().setFromObject(stepGeometry);
-    stepGeometry.position.y -= box.min.y;
-    stepGeometry.updateMatrixWorld(true);
-    
-    console.log('Orientation toggled:', isZUp ? 'Y-up' : 'Z-up');
-  }, [stepGeometry]);
-
   const handleReset = useCallback(() => {
+    // Abort any ongoing conversion
+    stepConverter.abort();
+    
     if (fileUrl) {
       URL.revokeObjectURL(fileUrl);
     }
@@ -395,31 +395,44 @@ export default function ThreeDViewer() {
       )}
 
       {isConverting && (
-        <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-          <div className="font-medium">Parsing STEP file...</div>
-          <div className="text-xs opacity-75 mt-1">
-            File: {fileName} | Size:{" "}
-            {currentFile?.size ? `${(currentFile.size / 1024 / 1024).toFixed(1)} MB` : "Unknown"}
+        <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-700">
+          <div className="font-medium text-base mb-2">Đang xử lý file STEP...</div>
+          <div className="text-xs opacity-75 mb-1">
+            <span className="font-medium">File:</span> {fileName}
           </div>
-          <div className="text-xs opacity-75 mt-1">
-            Stage: {conversionStage}
+          <div className="text-xs opacity-75 mb-1">
+            <span className="font-medium">Kích thước:</span>{" "}
+            {currentFile?.size ? `${(currentFile.size / 1024 / 1024).toFixed(2)} MB` : "Unknown"}
           </div>
-          <div className="mt-2 w-full bg-blue-200 rounded-full h-2">
+          <div className="text-sm font-medium mt-3 mb-2">
+            {conversionStage || "Đang khởi tạo..."}
+          </div>
+          <div className="mt-2 w-full bg-blue-200 rounded-full h-3 overflow-hidden shadow-inner">
             <div 
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out" 
-              style={{width: `${conversionProgress}%`}}
-            ></div>
+              className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-300 ease-out flex items-center justify-end pr-2" 
+              style={{width: `${Math.min(100, Math.max(0, conversionProgress))}%`}}
+            >
+              {conversionProgress > 15 && (
+                <span className="text-white text-xs font-medium">
+                  {conversionProgress.toFixed(0)}%
+                </span>
+              )}
+            </div>
           </div>
-          <div className="text-xs opacity-75 mt-1 text-right">
-            {conversionProgress.toFixed(0)}%
+          <div className="flex items-center justify-between mt-2">
+            <div className="text-xs opacity-75">
+              Đang tải từng đoạn...
+            </div>
+            <div className="text-sm font-semibold text-blue-800">
+              {conversionProgress.toFixed(1)}%
+            </div>
           </div>
         </div>
       )}
 
       <Toolbar 
         onReset={handleReset} 
-        fileName={fileName} 
-        onFixOrientation={stepGeometry ? handleFixOrientation : undefined}
+        fileName={fileName}
       />
 
       <div className="flex-1 rounded-2xl overflow-hidden bg-gray-100 border border-gray-200">
