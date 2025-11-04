@@ -267,6 +267,9 @@ export default function ThreeDViewer() {
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [conversionProgress, setConversionProgress] = useState(0);
   const [conversionStage, setConversionStage] = useState("");
+  
+  // Safety limit to avoid browser crashes on extremely large files
+  const MAX_FILE_SIZE_MB = 200; // adjust if your environment can handle more
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -284,6 +287,13 @@ export default function ThreeDViewer() {
       setIsConverting(false);
       setCurrentFile(file);
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
+
+      // Guard: prevent processing extremely large files that may crash the tab
+      const fileSizeMB = file.size / 1024 / 1024;
+      if (fileSizeMB > MAX_FILE_SIZE_MB) {
+        setError(`File quá lớn (${fileSizeMB.toFixed(1)} MB). Giới hạn hiện tại là ${MAX_FILE_SIZE_MB} MB cho an toàn.`);
+        return;
+      }
 
       // Check if it's a STEP file
       if (isStepFile(file)) {
@@ -347,7 +357,7 @@ export default function ThreeDViewer() {
         }
 
         const url = URL.createObjectURL(file);
-    setFileUrl(url);
+        setFileUrl(url);
         setFileName(file.name);
         setFileType(ext);
         setStepGeometry(null);
@@ -440,7 +450,8 @@ export default function ThreeDViewer() {
           <Canvas
             gl={{ 
               antialias: true, 
-              logarithmicDepthBuffer: true,
+              // Disable logarithmic depth buffer to avoid GPU/driver issues on some devices
+              logarithmicDepthBuffer: false,
               powerPreference: "high-performance",
               alpha: false,
               preserveDrawingBuffer: false
@@ -448,8 +459,9 @@ export default function ThreeDViewer() {
             camera={{ 
               position: [5, 5, 5], 
               fov: 50, 
-              near: 0.001, 
-              far: 1e8 
+              // Safer near/far planes to reduce precision/GPU stress on large scenes
+              near: 0.1, 
+              far: 100000 
             }}
             style={{ width: "100%", height: "100%" }}
             performance={{ min: 0.5 }}
