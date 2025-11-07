@@ -17,12 +17,12 @@ export default function CadViewPage() {
       <Card 
         title="3D File Viewer" 
         style={{ marginBottom: "24px" }}
-        bodyStyle={{ padding: 0 }}
+        styles={{ body: { padding: 0 } }}
       >
         <div style={{ padding: "24px" }}>
           <Space direction="vertical" style={{ width: "100%" }}>
             <Typography.Paragraph>
-              <strong>Hỗ trợ định dạng:</strong> .glb, .gltf, .stl, .obj, .step/.stp
+              <strong>Hỗ trợ định dạng:</strong> .glb, .gltf, .stl, .obj, .step/.stp, .dxf (DWG cần convert sang DXF)
             </Typography.Paragraph>
             <Typography.Paragraph>
               <strong>Tính năng:</strong> Kéo thả file, điều khiển camera, auto-framing, grid, lighting, STEP conversion
