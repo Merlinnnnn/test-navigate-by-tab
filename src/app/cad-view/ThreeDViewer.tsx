@@ -326,13 +326,13 @@ function DropZone({ onFile }: { onFile: (file: File) => void }) {
     >
       <div className="text-sm text-gray-700">
         <div className="font-medium">Drag & drop a 3D file here</div>
-        <div className="opacity-70">Supports .glb/.gltf, .stl, .obj, .step/.stp, .dxf (DWG cần convert)</div>
+        <div className="opacity-70">Supports .glb/.gltf, .stl, .obj, .step/.stp, .dxf</div>
       </div>
       <label className="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm cursor-pointer shadow">
         Choose file
         <input
           type="file"
-          accept=".glb,.gltf,.stl,.obj,.step,.stp,.dxf,.dwg"
+          accept=".glb,.gltf,.stl,.obj,.step,.stp,.dxf"
           className="hidden"
           onChange={onChange}
         />
@@ -699,10 +699,6 @@ export default function ThreeDViewer() {
       setIsConverting(false);
       setCurrentFile(file);
       const ext = file.name.split(".").pop()?.toLowerCase() || "";
-      // Set fileType tạm thời để hiển thị đúng trong UI
-      if (ext === "dwg") {
-        setFileType("dwg");
-      }
 
       // Guard: prevent processing extremely large files that may crash the tab
       const fileSizeMB = file.size / 1024 / 1024;
@@ -752,81 +748,6 @@ export default function ThreeDViewer() {
         } catch (e: any) {
           console.error("DXF parsing error:", e);
           setError(`Không đọc được DXF: ${e?.message || String(e)}`);
-          setIsConverting(false);
-          setConversionProgress(0);
-          setConversionStage("");
-          return;
-        }
-      }
-
-      // 2) DWG - convert sang DXF qua API
-      if (ext === "dwg") {
-        try {
-          setIsConverting(true);
-          setConversionStage("Converting DWG to DXF...");
-          
-          // Upload file lên API để convert
-          const formData = new FormData();
-          formData.append("file", file);
-          
-          const response = await fetch("/api/convert-dwg-to-dxf", {
-            method: "POST",
-            body: formData,
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: response.statusText }));
-            throw new Error(errorData.error || errorData.details || `Conversion failed: ${response.statusText}`);
-          }
-          
-          setConversionStage("Parsing converted DXF...");
-          
-          // Nhận DXF file từ API
-          const dxfBlob = await response.blob();
-          const dxfText = await dxfBlob.text();
-          
-          // Parse DXF như bình thường
-          const { default: DxfParser } = await import("dxf-parser");
-          const parser = new DxfParser();
-          const dxf = parser.parseSync(dxfText);
-          
-          if (!dxf) {
-            throw new Error("DXF parser returned null or undefined after conversion");
-          }
-          
-          console.log("DWG converted to DXF structure:", {
-            hasEntities: !!dxf.entities,
-            entityCount: dxf.entities?.length || 0,
-            hasHeader: !!dxf.header,
-            keys: Object.keys(dxf)
-          });
-          
-          setConversionStage("Building 3D geometry...");
-          const group = buildGroupFromDxf(dxf);
-          
-          if (group.children.length === 0) {
-            console.warn("DWG file converted but no geometry was created. Entities:", dxf.entities?.length || 0);
-          }
-          
-          setStepGeometry(group);
-          setFileUrl("");
-          setFileName(file.name);
-          setFileType("dxf"); // Treat as DXF after conversion
-          setIsConverting(false);
-          setConversionProgress(0);
-          setConversionStage("");
-          return;
-        } catch (e: any) {
-          console.error("DWG conversion error:", e);
-          const errorMessage = e?.message || String(e);
-          
-          // Hiển thị thông báo lỗi rõ ràng hơn
-          if (errorMessage.includes("converter tool not found")) {
-            setError("DWG converter tool chưa được cài đặt trên server. Vui lòng liên hệ quản trị viên để cài đặt LibreDWG hoặc ODA File Converter.");
-          } else {
-            setError(`Không thể chuyển đổi DWG sang DXF: ${errorMessage}`);
-          }
-          
           setIsConverting(false);
           setConversionProgress(0);
           setConversionStage("");
@@ -946,9 +867,7 @@ export default function ThreeDViewer() {
       {isConverting && (
         <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-700">
           <div className="font-medium text-base mb-2">
-            {fileType.toLowerCase() === "dwg" || fileName.toLowerCase().endsWith(".dwg")
-              ? "Đang chuyển đổi file DWG..." 
-              : "Đang xử lý file STEP..."}
+            Đang xử lý file STEP...
           </div>
           <div className="text-xs opacity-75 mb-1">
             <span className="font-medium">File:</span> {fileName}
